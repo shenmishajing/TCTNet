@@ -58,7 +58,7 @@ from detectron2.utils.events import (
 logger = logging.getLogger("detectron2")
 
 
-def get_evaluator(cfg, dataset_name, output_folder=None):
+def get_evaluator(cfg, dataset_name, output_folder = None):
     """
     Create evaluator(s) for a given dataset.
     This uses the special metadata "evaluator_type" associated with each builtin dataset.
@@ -73,10 +73,10 @@ def get_evaluator(cfg, dataset_name, output_folder=None):
         evaluator_list.append(
             SemSegEvaluator(
                 dataset_name,
-                distributed=True,
-                num_classes=cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
-                ignore_label=cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
-                output_dir=output_folder,
+                distributed = True,
+                num_classes = cfg.MODEL.SEM_SEG_HEAD.NUM_CLASSES,
+                ignore_label = cfg.MODEL.SEM_SEG_HEAD.IGNORE_VALUE,
+                output_dir = output_folder,
             )
         )
     if evaluator_type in ["coco", "coco_panoptic_seg"]:
@@ -85,12 +85,12 @@ def get_evaluator(cfg, dataset_name, output_folder=None):
         evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
     if evaluator_type == "cityscapes_instance":
         assert (
-            torch.cuda.device_count() >= comm.get_rank()
+                torch.cuda.device_count() >= comm.get_rank()
         ), "CityscapesEvaluator currently do not work with multiple machines."
         return CityscapesInstanceEvaluator(dataset_name)
     if evaluator_type == "cityscapes_sem_seg":
         assert (
-            torch.cuda.device_count() >= comm.get_rank()
+                torch.cuda.device_count() >= comm.get_rank()
         ), "CityscapesEvaluator currently do not work with multiple machines."
         return CityscapesSemSegEvaluator(dataset_name)
     if evaluator_type == "pascal_voc":
@@ -123,21 +123,21 @@ def do_test(cfg, model):
     return results
 
 
-def do_train(cfg, model, resume=False):
+def do_train(cfg, model, resume = False):
     model.train()
     optimizer = build_optimizer(cfg, model)
     scheduler = build_lr_scheduler(cfg, optimizer)
 
     checkpointer = DetectionCheckpointer(
-        model, cfg.OUTPUT_DIR, optimizer=optimizer, scheduler=scheduler
+        model, cfg.OUTPUT_DIR, optimizer = optimizer, scheduler = scheduler
     )
     start_iter = (
-        checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume=resume).get("iteration", -1) + 1
+            checkpointer.resume_or_load(cfg.MODEL.WEIGHTS, resume = resume).get("iteration", -1) + 1
     )
     max_iter = cfg.SOLVER.MAX_ITER
 
     periodic_checkpointer = PeriodicCheckpointer(
-        checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter=max_iter
+        checkpointer, cfg.SOLVER.CHECKPOINT_PERIOD, max_iter = max_iter
     )
 
     writers = (
@@ -166,18 +166,18 @@ def do_train(cfg, model, resume=False):
             loss_dict_reduced = {k: v.item() for k, v in comm.reduce_dict(loss_dict).items()}
             losses_reduced = sum(loss for loss in loss_dict_reduced.values())
             if comm.is_main_process():
-                storage.put_scalars(total_loss=losses_reduced, **loss_dict_reduced)
+                storage.put_scalars(total_loss = losses_reduced, **loss_dict_reduced)
 
             optimizer.zero_grad()
             losses.backward()
             optimizer.step()
-            storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint=False)
+            storage.put_scalar("lr", optimizer.param_groups[0]["lr"], smoothing_hint = False)
             scheduler.step()
 
             if (
-                cfg.TEST.EVAL_PERIOD > 0
-                and iteration % cfg.TEST.EVAL_PERIOD == 0
-                and iteration != max_iter
+                    cfg.TEST.EVAL_PERIOD > 0
+                    and iteration % cfg.TEST.EVAL_PERIOD == 0
+                    and iteration != max_iter
             ):
                 do_test(cfg, model)
                 # Compared to "train_net.py", the test results are not dumped to EventStorage
@@ -209,23 +209,19 @@ def main(args):
     model = build_model(cfg)
     logger.info("Model:\n{}".format(model))
     if args.eval_only:
-        DetectionCheckpointer(model, save_dir=cfg.OUTPUT_DIR).resume_or_load(
-            cfg.MODEL.WEIGHTS, resume=args.resume
+        DetectionCheckpointer(model, save_dir = cfg.OUTPUT_DIR).resume_or_load(
+            cfg.MODEL.WEIGHTS, resume = args.resume
         )
         return do_test(cfg, model)
 
     distributed = comm.get_world_size() > 1
     if distributed:
         model = DistributedDataParallel(
-<<<<<<< HEAD
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False,
-            find_unused_parameters=True
-=======
-            model, device_ids=[comm.get_local_rank()], broadcast_buffers=False, find_unused_parameters=True
->>>>>>> 7b936afd5b423c3188687d8b529a984bed528a87
+            model, device_ids = [comm.get_local_rank()], broadcast_buffers = False,
+            find_unused_parameters = True
         )
 
-    do_train(cfg, model, resume=args.resume)
+    do_train(cfg, model, resume = args.resume)
     return do_test(cfg, model)
 
 
@@ -235,8 +231,8 @@ if __name__ == "__main__":
     launch(
         main,
         args.num_gpus,
-        num_machines=args.num_machines,
-        machine_rank=args.machine_rank,
-        dist_url=args.dist_url,
-        args=(args,),
+        num_machines = args.num_machines,
+        machine_rank = args.machine_rank,
+        dist_url = args.dist_url,
+        args = (args,),
     )

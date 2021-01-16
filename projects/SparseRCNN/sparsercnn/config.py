@@ -12,7 +12,7 @@ def add_sparsercnn_config(cfg):
     Add config for SparseRCNN.
     """
     cfg.MODEL.SparseRCNN = CN()
-    cfg.MODEL.SparseRCNN.NUM_CLASSES = 80
+    cfg.MODEL.SparseRCNN.NUM_CLASSES = 6
     cfg.MODEL.SparseRCNN.NUM_PROPOSALS = 300
 
     # RCNN Head.
@@ -45,3 +45,9 @@ def add_sparsercnn_config(cfg):
     # Optimizer.
     cfg.SOLVER.OPTIMIZER = "ADAMW"
     cfg.SOLVER.BACKBONE_MULTIPLIER = 1.0
+
+    # Add config for WANDB.
+    cfg.WANDB = CN()
+    cfg.WANDB.PROJECT = 'tct'
+    cfg.WANDB.NAME = 'test'
+    cfg.WANDB.TAGS = ['Base-SparseRCNN']
