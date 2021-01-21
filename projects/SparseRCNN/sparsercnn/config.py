@@ -15,6 +15,13 @@ def add_sparsercnn_config(cfg):
     cfg.MODEL.SparseRCNN.NUM_CLASSES = 80
     cfg.MODEL.SparseRCNN.NUM_PROPOSALS = 300
 
+    # Proposal Head
+    cfg.MODEL.SparseRCNN.PROPOSAL = CN()
+    cfg.MODEL.SparseRCNN.PROPOSAL.K = 5
+    cfg.MODEL.SparseRCNN.PROPOSAL.IN_FEATURES = ["p2", "p3", "p4", "p5"]
+    cfg.MODEL.SparseRCNN.PROPOSAL.WH_RATIO = [1, 2, 3]
+    cfg.MODEL.SparseRCNN.PROPOSAL.WH_SCALE = [0.05, 0.1, 0.2]
+
     # RCNN Head.
     cfg.MODEL.SparseRCNN.NHEADS = 8
     cfg.MODEL.SparseRCNN.DROPOUT = 0.0

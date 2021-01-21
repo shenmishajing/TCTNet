@@ -22,7 +22,7 @@ from detectron2.utils.logger import log_first_n
 from fvcore.nn import giou_loss, smooth_l1_loss
 
 from .loss import SetCriterion, HungarianMatcher
-from .head import DynamicHead
+from .head import DynamicHead, ProposalHead
 from .util.box_ops import box_cxcywh_to_xyxy, box_xyxy_to_cxcywh
 from .util.misc import (NestedTensor, nested_tensor_from_tensor_list,
                         accuracy, get_world_size, interpolate,
@@ -52,11 +52,8 @@ class SparseRCNN(nn.Module):
         self.backbone = build_backbone(cfg)
         self.size_divisibility = self.backbone.size_divisibility
 
-        # Build Proposals.
-        self.init_proposal_features = nn.Embedding(self.num_proposals, self.hidden_dim)
-        self.init_proposal_boxes = nn.Embedding(self.num_proposals, 4)
-        nn.init.constant_(self.init_proposal_boxes.weight[:, :2], 0.5)
-        nn.init.constant_(self.init_proposal_boxes.weight[:, 2:], 1.0)
+        # Build Proposal Head.
+        self.proposal_head = ProposalHead(cfg = cfg, roi_input_shape = self.backbone.output_shape())
 
         # Build Dynamic Head.
         self.head = DynamicHead(cfg = cfg, roi_input_shape = self.backbone.output_shape())
@@ -85,7 +82,7 @@ class SparseRCNN(nn.Module):
                 aux_weight_dict.update({k + f"_{i}": v for k, v in weight_dict.items()})
             weight_dict.update(aux_weight_dict)
 
-        losses = ["labels", "boxes"]
+        losses = ["labels", "boxes", "objectness"]
 
         self.criterion = SetCriterion(cfg = cfg,
                                       num_classes = self.num_classes,
@@ -127,20 +124,17 @@ class SparseRCNN(nn.Module):
             features.append(feature)
 
         # Prepare Proposals.
-        proposal_boxes = self.init_proposal_boxes.weight.clone()
-        proposal_boxes = box_cxcywh_to_xyxy(proposal_boxes)
-        proposal_boxes = proposal_boxes[None] * images_whwh[:, None, :]
-        proposal_features = self.init_proposal_features.weight[None].repeat(proposal_boxes.shape[0], 1, 1)
+        proposal_boxes, proposal_features, proposal_objectness = self.proposal_head(features, images_whwh)
 
         # Prediction.
         outputs_class, outputs_coord = self.head(features, proposal_boxes, proposal_features)
-        output = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+        output = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1], 'prop_objectness': proposal_objectness}
 
         if self.training:
             gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-            targets = self.prepare_targets(gt_instances)
+            targets = self.prepare_targets(gt_instances, [p.shape[1:] for p in output['prop_objectness']])
             if self.deep_supervision:
-                output['aux_outputs'] = [{'pred_logits': a, 'pred_boxes': b}
+                output['aux_outputs'] = [{'pred_logits': a, 'pred_boxes': b, 'prop_objectness': proposal_objectness}
                                          for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
 
             loss_dict = self.criterion(output, targets)
@@ -168,7 +162,7 @@ class SparseRCNN(nn.Module):
 
             return processed_results
 
-    def prepare_targets(self, targets):
+    def prepare_targets(self, targets, objectness_shape):
         new_targets = []
         for targets_per_image in targets:
             target = {}
@@ -184,6 +178,24 @@ class SparseRCNN(nn.Module):
             image_size_xyxy_tgt = image_size_xyxy.unsqueeze(0).repeat(len(gt_boxes), 1)
             target["image_size_xyxy_tgt"] = image_size_xyxy_tgt.to(self.device)
             target["area"] = targets_per_image.gt_boxes.area().to(self.device)
+            if len(targets_per_image.gt_boxes.tensor) > 0:
+                target["objectness"] = []
+                for h, w in objectness_shape:
+                    xy = torch.stack(((torch.arange(h, dtype = torch.float, device = self.device) / h)[:, None].expand(-1, w),
+                                      (torch.arange(w, dtype = torch.float, device = self.device) / w)[None, :].expand(h, -1)), dim = -1)[
+                        None]
+                    boxes = targets_per_image.gt_boxes.tensor / image_size_xyxy
+                    l = xy[..., 1] - boxes[:, None, None, 0]
+                    r = boxes[:, None, None, 2] - xy[..., 1]
+                    t = xy[..., 0] - boxes[:, None, None, 1]
+                    b = boxes[:, None, None, 3] - xy[..., 0]
+                    in_box = (l > 0) & (r > 0) & (t > 0) & (b > 0)
+                    obj = torch.zeros((boxes.shape[0], h, w), dtype = torch.float, device = self.device)
+                    obj[in_box] = torch.sqrt(torch.min(l, r) / torch.max(l, r) * torch.min(t, b) / torch.max(t, b))[in_box]
+                    objectness, _ = torch.max(obj, dim = 0)
+                    target["objectness"].append(objectness)
+            else:
+                target["objectness"] = [torch.zeros((h, w), dtype = torch.float, device = self.device) for h, w in objectness_shape]
             new_targets.append(target)
 
         return new_targets
@@ -207,7 +219,7 @@ class SparseRCNN(nn.Module):
         if self.use_focal:
             scores = torch.sigmoid(box_cls)
             labels = torch.arange(self.num_classes, device = self.device). \
-                unsqueeze(0).repeat(self.num_proposals, 1).flatten(0, 1)
+                unsqueeze(0).repeat(scores.shape[1], 1).flatten(0, 1)
 
             for i, (scores_per_image, box_pred_per_image, image_size) in enumerate(zip(
                     scores, box_pred, image_sizes

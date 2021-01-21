@@ -22,6 +22,8 @@ import torch.nn.functional as F
 from detectron2.modeling.poolers import ROIPooler, cat
 from detectron2.structures import Boxes
 
+from .util.box_ops import box_cxcywh_to_xyxy
+
 _DEFAULT_SCALE_CLAMP = math.log(100000.0 / 16)
 
 
@@ -294,6 +296,124 @@ class DynamicConv(nn.Module):
         features = self.activation(features)
 
         return features
+
+
+class ProposalHead(nn.Module):
+
+    def __init__(self, cfg, roi_input_shape):
+        super().__init__()
+
+        self.k = cfg.MODEL.SparseRCNN.PROPOSAL.K
+        self.hidden_dim = cfg.MODEL.SparseRCNN.HIDDEN_DIM
+
+        # Build WH Proposals.
+        self.init_proposal_boxes_wh = []
+        for ratio in cfg.MODEL.SparseRCNN.PROPOSAL.WH_RATIO:
+            for scale in cfg.MODEL.SparseRCNN.PROPOSAL.WH_SCALE:
+                m = scale / math.sqrt(ratio)
+                if abs(ratio - 1) < 1e-7:
+                    self.init_proposal_boxes_wh.append([m, m])
+                else:
+                    self.init_proposal_boxes_wh.append([m, ratio * m])
+                    self.init_proposal_boxes_wh.append([ratio * m, m])
+        self.init_proposal_features = nn.Parameter(torch.Tensor(len(self.init_proposal_boxes_wh), self.hidden_dim))
+        self.init_proposal_boxes_wh = nn.Parameter(torch.clamp(torch.tensor(self.init_proposal_boxes_wh), 0, 1))
+
+        # Build heads.
+        roi_in_features = cfg.MODEL.ROI_HEADS.IN_FEATURES
+        roi_feature_to_index = {feature: i for i, feature in enumerate(roi_in_features)}
+        proposal_in_features = cfg.MODEL.SparseRCNN.PROPOSAL.IN_FEATURES
+        proposal_index = [roi_feature_to_index[feature] for feature in proposal_in_features]
+        self.in_feature = list(zip(proposal_index, proposal_in_features))
+        self.objectness_heads = nn.ModuleDict(
+            {in_feature: ObjectnessHead(roi_input_shape[in_feature].channels, self.k) for in_feature in proposal_in_features})
+
+        # Init parameters.
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        # init all parameters.
+        for name, p in self.named_parameters():
+            if 'weight' in name and p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(self, features, images_whwh):
+        """
+        :param features: List of Tensor(N, C, H, W) output of FPN
+        :param images_whwh: Tensor(N, 4) output of FPN
+        """
+
+        xy = []
+        proposal_objectness = []
+        for index, in_feature in self.in_feature:
+            p = self.objectness_heads[in_feature](features[index])
+            proposal_objectness.append(p.squeeze(dim = 1))
+            xy.append(self.objectness_heads[in_feature].get_xy(p))
+        xy = torch.cat(xy, dim = 1)
+        xy = xy[:, :, None, :].expand(-1, -1, self.init_proposal_boxes_wh.shape[0], -1)
+        init_proposal_boxes_wh = self.init_proposal_boxes_wh
+        init_proposal_boxes_wh = init_proposal_boxes_wh[None, None, :, :].expand(*xy.shape[:2], -1, -1)
+        init_proposal_features = self.init_proposal_features[None, None, :, :].expand(*xy.shape[:2], -1, -1)
+        proposal_boxes = torch.cat((xy, init_proposal_boxes_wh), dim = 3)
+        N = proposal_boxes.shape[0]
+        proposal_boxes = proposal_boxes.reshape((-1, 4))
+        proposal_boxes = box_cxcywh_to_xyxy(proposal_boxes)
+        proposal_boxes = proposal_boxes.reshape((N, -1, 4))
+        proposal_boxes *= images_whwh[:, None, :]
+        return proposal_boxes, init_proposal_features.reshape((N, -1, self.hidden_dim)), proposal_objectness
+
+
+class ObjectnessHead(nn.Module):
+
+    def __init__(self, channel, k):
+        super().__init__()
+
+        self.channel = channel
+        self.k = k
+
+        # layers.
+        self.conv1 = nn.Conv2d(self.channel, self.channel, 3, padding = 1)
+        self.conv2 = nn.Conv2d(self.channel, self.channel, 3, padding = 1)
+        self.conv3 = nn.Conv2d(self.channel, 1, 3, padding = 1)
+
+        self.norm1 = nn.BatchNorm2d(self.channel)
+        self.norm2 = nn.BatchNorm2d(self.channel)
+        self.norm3 = nn.BatchNorm2d(1)
+
+        self.relu = nn.ReLU(inplace = True)
+        self.sigmoid = nn.Sigmoid()
+
+    def get_xy(self, p: torch.Tensor):
+        """
+        :param p: (N, 1, H, W) or (N, H, W) output of self.forward
+        :return xy: (N, k, 2) k xys
+        """
+        p = p.squeeze(dim = 1)
+        N, h, w = p.shape
+        p = p.reshape((N, -1))
+        values, indices = p.topk(self.k, 1)
+        xy = torch.stack((indices // w / float(h), indices % w / float(w)), dim = -1)
+        return xy
+
+    def forward(self, feature):
+        """
+        :param feature: (N, C, H, W) one scale feature of FPN output
+        :return p: (N, 1, H, W) probability of object
+        """
+
+        feature = self.conv1(feature)
+        feature = self.norm1(feature)
+        feature = self.relu(feature)
+
+        feature = self.conv2(feature)
+        feature = self.norm2(feature)
+        feature = self.relu(feature)
+
+        feature = self.conv3(feature)
+        feature = self.norm3(feature)
+        p = self.sigmoid(feature)
+
+        return p
 
 
 def _get_clones(module, N):
