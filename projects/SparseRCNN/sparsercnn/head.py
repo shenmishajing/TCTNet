@@ -37,12 +37,9 @@ class DynamicHead(nn.Module):
         # Build heads.
         num_classes = cfg.MODEL.SparseRCNN.NUM_CLASSES
         d_model = cfg.MODEL.SparseRCNN.HIDDEN_DIM
-        dim_feedforward = cfg.MODEL.SparseRCNN.DIM_FEEDFORWARD
-        nhead = cfg.MODEL.SparseRCNN.NHEADS
-        dropout = cfg.MODEL.SparseRCNN.DROPOUT
         activation = cfg.MODEL.SparseRCNN.ACTIVATION
         num_heads = cfg.MODEL.SparseRCNN.NUM_HEADS
-        rcnn_head = RCNNHead(cfg, d_model, num_classes, dim_feedforward, nhead, dropout, activation)
+        rcnn_head = RCNNHead(cfg, d_model, num_classes, activation)
         self.head_series = _get_clones(rcnn_head, num_heads)
         self.return_intermediate = cfg.MODEL.SparseRCNN.DEEP_SUPERVISION
 
@@ -112,35 +109,33 @@ class DynamicHead(nn.Module):
 
 class RCNNHead(nn.Module):
 
-    def __init__(self, cfg, d_model, num_classes, dim_feedforward = 2048, nhead = 8, dropout = 0.1, activation = "relu",
-                 scale_clamp: float = _DEFAULT_SCALE_CLAMP, bbox_weights = (2.0, 2.0, 1.0, 1.0)):
+    def __init__(self, cfg, d_model, num_classes, activation = "relu", scale_clamp: float = _DEFAULT_SCALE_CLAMP,
+                 bbox_weights = (2.0, 2.0, 1.0, 1.0)):
         super().__init__()
 
         self.d_model = d_model
 
-        # dynamic.
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout = dropout)
-        self.inst_interact = DynamicConv(cfg)
+        # layers.
+        self.conv1 = nn.Conv2d(d_model, d_model, 3, padding = 1)
+        self.conv2 = nn.Conv2d(d_model, d_model, 3, padding = 1)
+        self.conv3 = nn.Conv2d(d_model, d_model, 3, padding = 1)
 
-        self.linear1 = nn.Linear(d_model, dim_feedforward)
-        self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model)
-
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
+        self.norm1 = nn.BatchNorm2d(d_model)
+        self.norm2 = nn.BatchNorm2d(d_model)
+        self.norm3 = nn.BatchNorm2d(d_model)
 
         self.activation = _get_activation_fn(activation)
+
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+
+        self.relation_matrix = nn.Parameter(torch.ones(d_model, d_model))
 
         # cls.
         num_cls = cfg.MODEL.SparseRCNN.NUM_CLS
         cls_module = list()
         for _ in range(num_cls):
-            cls_module.append(nn.Linear(d_model, d_model, False))
-            cls_module.append(nn.LayerNorm(d_model))
+            cls_module.append(nn.Linear(2 * d_model, 2 * d_model, False))
+            cls_module.append(nn.LayerNorm(2 * d_model))
             cls_module.append(nn.ReLU(inplace = True))
         self.cls_module = nn.ModuleList(cls_module)
 
@@ -148,18 +143,18 @@ class RCNNHead(nn.Module):
         num_reg = cfg.MODEL.SparseRCNN.NUM_REG
         reg_module = list()
         for _ in range(num_reg):
-            reg_module.append(nn.Linear(d_model, d_model, False))
-            reg_module.append(nn.LayerNorm(d_model))
+            reg_module.append(nn.Linear(2 * d_model, 2 * d_model, False))
+            reg_module.append(nn.LayerNorm(2 * d_model))
             reg_module.append(nn.ReLU(inplace = True))
         self.reg_module = nn.ModuleList(reg_module)
 
         # pred.
         self.use_focal = cfg.MODEL.SparseRCNN.USE_FOCAL
         if self.use_focal:
-            self.class_logits = nn.Linear(d_model, num_classes)
+            self.class_logits = nn.Linear(2 * d_model, num_classes)
         else:
-            self.class_logits = nn.Linear(d_model, num_classes + 1)
-        self.bboxes_delta = nn.Linear(d_model, 4)
+            self.class_logits = nn.Linear(2 * d_model, num_classes + 1)
+        self.bboxes_delta = nn.Linear(2 * d_model, 4)
         self.scale_clamp = scale_clamp
         self.bbox_weights = bbox_weights
 
@@ -176,27 +171,27 @@ class RCNNHead(nn.Module):
         for b in range(N):
             proposal_boxes.append(Boxes(bboxes[b]))
         roi_features = pooler(features, proposal_boxes)
-        roi_features = roi_features.view(N * nr_boxes, self.d_model, -1)
 
-        # self_att.
-        pro_features = pro_features.permute(1, 0, 2)
-        pro_features2 = self.self_attn(pro_features, pro_features, value = pro_features)[0]
-        pro_features = pro_features + self.dropout1(pro_features2)
-        pro_features = self.norm1(pro_features)
+        roi_features = self.conv1(roi_features)
+        roi_features = self.norm1(roi_features)
+        roi_features = self.activation(roi_features)
 
-        # inst_interact.
-        pro_features = pro_features.permute(1, 0, 2).reshape(N * nr_boxes, self.d_model)
-        pro_features2 = self.inst_interact(pro_features, roi_features)
-        pro_features = pro_features + self.dropout2(pro_features2)
-        obj_features = self.norm2(pro_features)
+        roi_features = self.conv2(roi_features)
+        roi_features = self.norm2(roi_features)
+        roi_features = self.activation(roi_features)
 
-        # obj_feature.
-        obj_features2 = self.linear2(self.dropout(self.activation(self.linear1(obj_features))))
-        obj_features = obj_features + self.dropout3(obj_features2)
-        obj_features = self.norm3(obj_features)
+        roi_features = self.conv3(roi_features)
+        roi_features = self.norm3(roi_features)
+        roi_features = self.activation(roi_features)
 
-        cls_feature = obj_features.clone()
-        reg_feature = obj_features.clone()
+        pro_features = self.pool(roi_features).squeeze(dim = -1).squeeze(dim = -1)
+
+        relation_features = pro_features.mm(self.relation_matrix).mm(pro_features.T).mm(pro_features)
+
+        pro_features = torch.cat((pro_features, relation_features), dim = 1)
+
+        cls_feature = pro_features.clone()
+        reg_feature = pro_features.clone()
         for cls_layer in self.cls_module:
             cls_feature = cls_layer(cls_feature)
         for reg_layer in self.reg_module:
@@ -205,7 +200,7 @@ class RCNNHead(nn.Module):
         bboxes_deltas = self.bboxes_delta(reg_feature)
         pred_bboxes = self.apply_deltas(bboxes_deltas, bboxes.view(-1, 4))
 
-        return class_logits.view(N, nr_boxes, -1), pred_bboxes.view(N, nr_boxes, -1), obj_features.reshape(N, nr_boxes, -1)
+        return class_logits.view(N, nr_boxes, -1), pred_bboxes.view(N, nr_boxes, -1), pro_features
 
     def apply_deltas(self, deltas, boxes):
         """

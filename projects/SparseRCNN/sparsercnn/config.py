@@ -50,4 +50,4 @@ def add_sparsercnn_config(cfg):
     cfg.WANDB = CN()
     cfg.WANDB.PROJECT = 'tct'
     cfg.WANDB.NAME = 'test'
-    cfg.WANDB.TAGS = ['Base-SparseRCNN']
+    cfg.WANDB.TAGS = ['Relation_module']
