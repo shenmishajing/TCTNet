@@ -94,11 +94,8 @@ class DynamicHead(nn.Module):
         inter_class_logits = []
         inter_pred_bboxes = []
 
-        bs = len(features[0])
         bboxes = init_bboxes
-        
-        init_features = init_features[None].repeat(bs, 1, 1)
-        proposal_features = init_features.clone()
+        proposal_features = init_features
         
         for rcnn_head in self.head_series:
             class_logits, pred_bboxes, proposal_features = rcnn_head(features, bboxes, proposal_features, self.box_pooler)
