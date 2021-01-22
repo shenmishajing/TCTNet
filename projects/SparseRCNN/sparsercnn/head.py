@@ -97,7 +97,7 @@ class DynamicHead(nn.Module):
         bs = len(features[0])
         bboxes = init_bboxes
         
-        init_features = init_features[None].repeat(1, bs, 1)
+        init_features = init_features[None].repeat(bs, 1, 1)
         proposal_features = init_features.clone()
         
         for rcnn_head in self.head_series:
