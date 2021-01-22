@@ -62,6 +62,7 @@ class SparseRCNN(nn.Module):
         class_weight = cfg.MODEL.SparseRCNN.CLASS_WEIGHT
         giou_weight = cfg.MODEL.SparseRCNN.GIOU_WEIGHT
         l1_weight = cfg.MODEL.SparseRCNN.L1_WEIGHT
+        objectness_weight = cfg.MODEL.SparseRCNN.OBJECTNESS_WEIGHT
         no_object_weight = cfg.MODEL.SparseRCNN.NO_OBJECT_WEIGHT
         regularization_weight = cfg.MODEL.SparseRCNN.REGULARIZATION_WEIGHT
         self.regularization_p = cfg.MODEL.SparseRCNN.REGULARIZATION_P
@@ -74,7 +75,7 @@ class SparseRCNN(nn.Module):
                                    cost_bbox = l1_weight,
                                    cost_giou = giou_weight,
                                    use_focal = self.use_focal)
-        weight_dict = {"loss_ce": class_weight, "loss_bbox": l1_weight, "loss_giou": giou_weight,
+        weight_dict = {"loss_ce": class_weight, "loss_bbox": l1_weight, "loss_giou": giou_weight, "loss_objectness": objectness_weight,
                        "loss_regularization": regularization_weight}
         if self.deep_supervision:
             aux_weight_dict = {}
