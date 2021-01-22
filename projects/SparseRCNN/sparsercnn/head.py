@@ -85,16 +85,15 @@ class DynamicHead(nn.Module):
         )
         return box_pooler
 
-    def forward(self, features, init_bboxes, init_features):
+    def forward(self, features, init_bboxes):
 
         inter_class_logits = []
         inter_pred_bboxes = []
 
         bboxes = init_bboxes
-        proposal_features = init_features
 
         for rcnn_head in self.head_series:
-            class_logits, pred_bboxes, proposal_features = rcnn_head(features, bboxes, proposal_features, self.box_pooler)
+            class_logits, pred_bboxes = rcnn_head(features, bboxes, self.box_pooler)
 
             if self.return_intermediate:
                 inter_class_logits.append(class_logits)
@@ -158,10 +157,9 @@ class RCNNHead(nn.Module):
         self.scale_clamp = scale_clamp
         self.bbox_weights = bbox_weights
 
-    def forward(self, features, bboxes, pro_features, pooler):
+    def forward(self, features, bboxes, pooler):
         """
         :param bboxes: (N, nr_boxes, 4)
-        :param pro_features: (N, nr_boxes, d_model)
         """
 
         N, nr_boxes = bboxes.shape[:2]
@@ -200,7 +198,7 @@ class RCNNHead(nn.Module):
         bboxes_deltas = self.bboxes_delta(reg_feature)
         pred_bboxes = self.apply_deltas(bboxes_deltas, bboxes.view(-1, 4))
 
-        return class_logits.view(N, nr_boxes, -1), pred_bboxes.view(N, nr_boxes, -1), pro_features
+        return class_logits.view(N, nr_boxes, -1), pred_bboxes.view(N, nr_boxes, -1)
 
     def apply_deltas(self, deltas, boxes):
         """
