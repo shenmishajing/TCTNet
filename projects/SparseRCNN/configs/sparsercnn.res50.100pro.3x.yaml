@@ -6,7 +6,6 @@ MODEL:
         STRIDE_IN_1X1: False
     SparseRCNN:
         NUM_PROPOSALS: 100
-        NUM_CLASSES: 6
 DATASETS:
     TRAIN: ("coco_2017_train",)
     TEST: ("coco_2017_val",)
