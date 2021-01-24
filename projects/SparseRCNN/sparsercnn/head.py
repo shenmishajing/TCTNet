@@ -37,9 +37,11 @@ class DynamicHead(nn.Module):
         # Build heads.
         num_classes = cfg.MODEL.SparseRCNN.NUM_CLASSES
         d_model = cfg.MODEL.SparseRCNN.HIDDEN_DIM
+        dim_feedforward = cfg.MODEL.SparseRCNN.DIM_FEEDFORWARD
+        dropout = cfg.MODEL.SparseRCNN.DROPOUT
         activation = cfg.MODEL.SparseRCNN.ACTIVATION
         num_heads = cfg.MODEL.SparseRCNN.NUM_HEADS
-        rcnn_head = RCNNHead(cfg, d_model, num_classes, activation)
+        rcnn_head = RCNNHead(cfg, d_model, num_classes, dim_feedforward, dropout, activation)
         self.head_series = _get_clones(rcnn_head, num_heads)
         self.return_intermediate = cfg.MODEL.SparseRCNN.DEEP_SUPERVISION
 
@@ -108,26 +110,21 @@ class DynamicHead(nn.Module):
 
 class RCNNHead(nn.Module):
 
-    def __init__(self, cfg, d_model, num_classes, activation = "relu", scale_clamp: float = _DEFAULT_SCALE_CLAMP,
-                 bbox_weights = (2.0, 2.0, 1.0, 1.0)):
+    def __init__(self, cfg, d_model, num_classes, dim_feedforward = 2048, dropout = 0.1, activation = "relu",
+                 scale_clamp: float = _DEFAULT_SCALE_CLAMP, bbox_weights = (2.0, 2.0, 1.0, 1.0)):
         super().__init__()
 
         self.d_model = d_model
 
-        # layers.
-        self.conv1 = nn.Conv2d(d_model, d_model, 3, padding = 1)
-        self.conv2 = nn.Conv2d(d_model, d_model, 3, padding = 1)
-        self.conv3 = nn.Conv2d(d_model, d_model, 3, padding = 1)
-
-        self.norm1 = nn.BatchNorm2d(d_model)
-        self.norm2 = nn.BatchNorm2d(d_model)
-        self.norm3 = nn.BatchNorm2d(d_model)
-
-        self.activation = _get_activation_fn(activation)
-
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
-
         self.relation_matrix = nn.Parameter(torch.ones(d_model, d_model))
+
+        # layers
+        self.linear1 = nn.Linear(2 * d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, 2 * d_model)
+        self.norm = nn.LayerNorm(2 * d_model)
+        self.activation = _get_activation_fn(activation)
 
         # cls.
         num_cls = cfg.MODEL.SparseRCNN.NUM_CLS
@@ -170,26 +167,17 @@ class RCNNHead(nn.Module):
             proposal_boxes.append(Boxes(bboxes[b]))
         roi_features = pooler(features, proposal_boxes)
 
-        roi_features = self.conv1(roi_features)
-        roi_features = self.norm1(roi_features)
-        roi_features = self.activation(roi_features)
-
-        roi_features = self.conv2(roi_features)
-        roi_features = self.norm2(roi_features)
-        roi_features = self.activation(roi_features)
-
-        roi_features = self.conv3(roi_features)
-        roi_features = self.norm3(roi_features)
-        roi_features = self.activation(roi_features)
-
         pro_features = self.pool(roi_features).squeeze(dim = -1).squeeze(dim = -1)
-
         relation_features = pro_features.mm(self.relation_matrix).mm(pro_features.T).mm(pro_features)
-
         pro_features = torch.cat((pro_features, relation_features), dim = 1)
 
-        cls_feature = pro_features.clone()
-        reg_feature = pro_features.clone()
+        # obj_feature.
+        obj_features2 = self.linear2(self.dropout(self.activation(self.linear1(pro_features))))
+        obj_features = pro_features + self.dropout(obj_features2)
+        obj_features = self.norm(obj_features)
+
+        cls_feature = obj_features.clone()
+        reg_feature = obj_features.clone()
         for cls_layer in self.cls_module:
             cls_feature = cls_layer(cls_feature)
         for reg_layer in self.reg_module:
