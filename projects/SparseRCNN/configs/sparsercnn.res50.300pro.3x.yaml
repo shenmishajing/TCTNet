@@ -13,6 +13,3 @@ INPUT:
     CROP:
         ENABLED: True
     FORMAT: "RGB"
-WANDB:
-    TAGS:
-        - sparsercnn.res50.300pro.3x
