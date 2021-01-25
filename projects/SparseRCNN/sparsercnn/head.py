@@ -118,6 +118,11 @@ class RCNNHead(nn.Module):
 
         self.d_model = d_model
 
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.relation_matrix = nn.Parameter(torch.ones(d_model, d_model))
+        self.linear_relation = nn.Linear(2 * d_model, d_model)
+        self.linear_interact = nn.Linear(2 * d_model, d_model)
+
         # dynamic.
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout = dropout)
         self.inst_interact = DynamicConv(cfg)
@@ -176,6 +181,12 @@ class RCNNHead(nn.Module):
         for b in range(N):
             proposal_boxes.append(Boxes(bboxes[b]))
         roi_features = pooler(features, proposal_boxes)
+
+        relation_feature = self.pool(roi_features).squeeze(dim = -1).squeeze(dim = -1)
+        relation_feature2 = relation_feature.mm(self.relation_matrix).mm(relation_feature.T).mm(relation_feature)
+        relation_feature = torch.cat((relation_feature, relation_feature2), dim = 1)
+        relation_feature = self.dropout(self.linear_relation(relation_feature))
+
         roi_features = roi_features.view(N * nr_boxes, self.d_model, -1)
 
         # self_att.
@@ -186,9 +197,11 @@ class RCNNHead(nn.Module):
 
         # inst_interact.
         pro_features = pro_features.permute(1, 0, 2).reshape(N * nr_boxes, self.d_model)
+        pro_features = self.dropout(
+            self.linear_interact(torch.cat((pro_features, relation_feature), dim = 1)).reshape(1, N * nr_boxes, self.d_model))
         pro_features2 = self.inst_interact(pro_features, roi_features)
         pro_features = pro_features + self.dropout2(pro_features2)
-        obj_features = self.norm2(pro_features)
+        obj_features = self.norm2(pro_features).squeeze(dim = 0)
 
         # obj_feature.
         obj_features2 = self.linear2(self.dropout(self.activation(self.linear1(obj_features))))
