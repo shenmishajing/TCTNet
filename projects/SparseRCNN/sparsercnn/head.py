@@ -88,16 +88,15 @@ class DynamicHead(nn.Module):
         )
         return box_pooler
 
-    def forward(self, features, init_bboxes, init_features):
+    def forward(self, features, init_bboxes):
 
         inter_class_logits = []
         inter_pred_bboxes = []
 
         bboxes = init_bboxes
-        proposal_features = init_features
 
         for rcnn_head in self.head_series:
-            class_logits, pred_bboxes, proposal_features = rcnn_head(features, bboxes, proposal_features, self.box_pooler)
+            class_logits, pred_bboxes = rcnn_head(features, bboxes, self.box_pooler)
 
             if self.return_intermediate:
                 inter_class_logits.append(class_logits)
@@ -121,20 +120,19 @@ class RCNNHead(nn.Module):
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.relation_matrix = nn.Parameter(torch.ones(d_model, d_model))
 
+        pooler_resolution = cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION
+        num_output = self.d_model * pooler_resolution ** 2
+        self.out_layer = nn.Linear(num_output, d_model)
+
         # dynamic.
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout = dropout)
         self.inst_interact = DynamicConv(cfg)
 
         self.linear1 = nn.Linear(d_model, dim_feedforward)
-        self.dropout = nn.Dropout(dropout)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
 
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
-        self.norm3 = nn.LayerNorm(d_model)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
+        self.dropout = nn.Dropout(dropout)
 
         self.activation = _get_activation_fn(activation)
 
@@ -166,10 +164,9 @@ class RCNNHead(nn.Module):
         self.scale_clamp = scale_clamp
         self.bbox_weights = bbox_weights
 
-    def forward(self, features, bboxes, pro_features, pooler):
+    def forward(self, features, bboxes, pooler):
         """
         :param bboxes: (N, nr_boxes, 4)
-        :param pro_features: (N, nr_boxes, d_model)
         """
 
         N, nr_boxes = bboxes.shape[:2]
@@ -180,29 +177,23 @@ class RCNNHead(nn.Module):
             proposal_boxes.append(Boxes(bboxes[b]))
         roi_features = pooler(features, proposal_boxes)
 
-        relation_weight = self.pool(roi_features).reshape(N, nr_boxes, -1)
-        relation_weight = relation_weight.bmm(self.relation_matrix.repeat(N, 1, 1)).bmm(relation_weight.permute(0, 2, 1))
-
-        roi_features = roi_features.reshape(N, nr_boxes, -1)
-        relation_feature = roi_features + self.dropout(relation_weight.bmm(roi_features))
-        relation_feature = relation_feature.reshape(N * nr_boxes, self.d_model, -1)
-
-        # self_att.
-        pro_features = pro_features.permute(1, 0, 2)
-        pro_features2 = self.self_attn(pro_features, pro_features, value = pro_features)[0]
-        pro_features = pro_features + self.dropout1(pro_features2)
-        pro_features = self.norm1(pro_features)
+        pool_roi_features = self.pool(roi_features).reshape(N, nr_boxes, -1)
+        relation_weight = pool_roi_features.bmm(self.relation_matrix.repeat(N, 1, 1)).bmm(pool_roi_features.permute(0, 2, 1))
+        relation_feature = pool_roi_features + self.dropout(relation_weight.bmm(pool_roi_features))
+        relation_feature = relation_feature.reshape(N * nr_boxes, self.d_model)
 
         # inst_interact.
-        pro_features = pro_features.permute(1, 0, 2).reshape(N * nr_boxes, self.d_model)
-        pro_features2 = self.inst_interact(pro_features, relation_feature)
-        pro_features = pro_features + self.dropout2(pro_features2)
-        obj_features = self.norm2(pro_features)
+        roi_features = roi_features.reshape(N * nr_boxes, self.d_model, -1)
+        obj_features = self.inst_interact(relation_feature, roi_features)
+        obj_features = roi_features + self.dropout(obj_features)
+        obj_features = obj_features.flatten(1)
+        obj_features = self.out_layer(obj_features)
+        obj_features = self.norm1(obj_features)
 
         # obj_feature.
         obj_features2 = self.linear2(self.dropout(self.activation(self.linear1(obj_features))))
-        obj_features = obj_features + self.dropout3(obj_features2)
-        obj_features = self.norm3(obj_features)
+        obj_features = obj_features + self.dropout(obj_features2)
+        obj_features = self.norm2(obj_features)
 
         cls_feature = obj_features.clone()
         reg_feature = obj_features.clone()
@@ -214,7 +205,7 @@ class RCNNHead(nn.Module):
         bboxes_deltas = self.bboxes_delta(reg_feature)
         pred_bboxes = self.apply_deltas(bboxes_deltas, bboxes.view(-1, 4))
 
-        return class_logits.view(N, nr_boxes, -1), pred_bboxes.view(N, nr_boxes, -1), obj_features.reshape(N, nr_boxes, -1)
+        return class_logits.view(N, nr_boxes, -1), pred_bboxes.view(N, nr_boxes, -1)
 
     def apply_deltas(self, deltas, boxes):
         """
@@ -273,18 +264,13 @@ class DynamicConv(nn.Module):
 
         self.activation = nn.ReLU(inplace = True)
 
-        pooler_resolution = cfg.MODEL.ROI_BOX_HEAD.POOLER_RESOLUTION
-        num_output = self.hidden_dim * pooler_resolution ** 2
-        self.out_layer = nn.Linear(num_output, self.hidden_dim)
-        self.norm3 = nn.LayerNorm(self.hidden_dim)
-
-    def forward(self, pro_features, roi_features):
+    def forward(self, param_features, roi_features):
         '''
-        pro_features: (N * nr_boxes, self.d_model)
+        param_features: (N * nr_boxes, self.d_model)
         roi_features: (N * nr_boxes, self.d_model, 49)
         '''
         features = roi_features.permute(0, 2, 1)
-        parameters = self.dynamic_layer(pro_features)
+        parameters = self.dynamic_layer(param_features)
 
         param1 = parameters[:, :self.num_params].view(-1, self.hidden_dim, self.dim_dynamic)
         param2 = parameters[:, self.num_params:].view(-1, self.dim_dynamic, self.hidden_dim)
@@ -297,12 +283,7 @@ class DynamicConv(nn.Module):
         features = self.norm2(features)
         features = self.activation(features)
 
-        features = features.flatten(1)
-        features = self.out_layer(features)
-        features = self.norm3(features)
-        features = self.activation(features)
-
-        return features
+        return features.permute(0, 2, 1)
 
 
 def _get_clones(module, N):

@@ -53,7 +53,6 @@ class SparseRCNN(nn.Module):
         self.size_divisibility = self.backbone.size_divisibility
 
         # Build Proposals.
-        self.init_proposal_features = nn.Embedding(self.num_proposals, self.hidden_dim)
         self.init_proposal_boxes = nn.Embedding(self.num_proposals, 4)
         nn.init.constant_(self.init_proposal_boxes.weight[:, :2], 0.5)
         nn.init.constant_(self.init_proposal_boxes.weight[:, 2:], 1.0)
@@ -127,10 +126,9 @@ class SparseRCNN(nn.Module):
         proposal_boxes = self.init_proposal_boxes.weight.clone()
         proposal_boxes = box_cxcywh_to_xyxy(proposal_boxes)
         proposal_boxes = proposal_boxes[None] * images_whwh[:, None, :]
-        proposal_features = self.init_proposal_features.weight[None].repeat(proposal_boxes.shape[0], 1, 1)
 
         # Prediction.
-        outputs_class, outputs_coord = self.head(features, proposal_boxes, proposal_features)
+        outputs_class, outputs_coord = self.head(features, proposal_boxes)
         output = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
 
         if self.training:
