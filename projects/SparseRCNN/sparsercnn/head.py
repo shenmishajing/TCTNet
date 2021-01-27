@@ -197,11 +197,10 @@ class RCNNHead(nn.Module):
 
         # inst_interact.
         pro_features = pro_features.permute(1, 0, 2).reshape(N * nr_boxes, self.d_model)
-        pro_features = self.dropout(
-            self.linear_interact(torch.cat((pro_features, relation_feature), dim = 1)).reshape(1, N * nr_boxes, self.d_model))
+        pro_features = self.dropout(self.linear_interact(torch.cat((pro_features, relation_feature), dim = 1)))
         pro_features2 = self.inst_interact(pro_features, roi_features)
         pro_features = pro_features + self.dropout2(pro_features2)
-        obj_features = self.norm2(pro_features).squeeze(dim = 0)
+        obj_features = self.norm2(pro_features)
 
         # obj_feature.
         obj_features2 = self.linear2(self.dropout(self.activation(self.linear1(obj_features))))
