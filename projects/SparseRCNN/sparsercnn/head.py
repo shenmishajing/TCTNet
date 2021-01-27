@@ -185,7 +185,7 @@ class RCNNHead(nn.Module):
 
         roi_features = roi_features.reshape(N, nr_boxes, -1)
         relation_feature = roi_features + self.dropout(relation_weight.bmm(roi_features))
-        relation_feature = relation_feature.reshape(N * nr_boxes, self.d_model, -1).permute(2, 0, 1)
+        relation_feature = relation_feature.reshape(N * nr_boxes, self.d_model, -1)
 
         # self_att.
         pro_features = pro_features.permute(1, 0, 2)
@@ -197,7 +197,7 @@ class RCNNHead(nn.Module):
         pro_features = pro_features.permute(1, 0, 2).reshape(N * nr_boxes, self.d_model)
         pro_features2 = self.inst_interact(pro_features, relation_feature)
         pro_features = pro_features + self.dropout2(pro_features2)
-        obj_features = self.norm2(pro_features).squeeze(dim = 0)
+        obj_features = self.norm2(pro_features)
 
         # obj_feature.
         obj_features2 = self.linear2(self.dropout(self.activation(self.linear1(obj_features))))
