@@ -117,9 +117,9 @@ class RCNNHead(nn.Module):
         super().__init__()
 
         self.d_model = d_model
+        self.num_proposals = cfg.MODEL.SparseRCNN.NUM_PROPOSALS
 
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.relation_matrix = nn.Parameter(torch.ones(d_model, d_model))
+        self.conv = nn.Conv2d(self.num_proposals, self.num_proposals, 1)
 
         # dynamic.
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout = dropout)
@@ -178,13 +178,9 @@ class RCNNHead(nn.Module):
         proposal_boxes = list()
         for b in range(N):
             proposal_boxes.append(Boxes(bboxes[b]))
-        roi_features = pooler(features, proposal_boxes)
+        roi_features = pooler(features, proposal_boxes).reshape(N, nr_boxes, self.d_model, -1)
 
-        relation_weight = self.pool(roi_features).reshape(N, nr_boxes, -1)
-        relation_weight = relation_weight.bmm(self.relation_matrix.repeat(N, 1, 1)).bmm(relation_weight.permute(0, 2, 1))
-
-        roi_features = roi_features.reshape(N, nr_boxes, -1)
-        relation_feature = roi_features + self.dropout(relation_weight.bmm(roi_features))
+        relation_feature = self.conv(roi_features)
         relation_feature = relation_feature.reshape(N * nr_boxes, self.d_model, -1)
 
         # self_att.
