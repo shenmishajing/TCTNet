@@ -372,15 +372,8 @@ class ObjectnessHead(nn.Module):
         self.k = k
 
         # layers.
-        self.conv1 = nn.Conv2d(self.channel, self.channel, 3, padding = 1)
-        self.conv2 = nn.Conv2d(self.channel, self.channel, 3, padding = 1)
-        self.conv3 = nn.Conv2d(self.channel, 1, 3, padding = 1)
-
-        self.norm1 = nn.BatchNorm2d(self.channel)
-        self.norm2 = nn.BatchNorm2d(self.channel)
-        self.norm3 = nn.BatchNorm2d(1)
-
-        self.relu = nn.ReLU(inplace = True)
+        self.conv = nn.Conv2d(self.channel, 1, 3, padding = 1)
+        self.norm = nn.BatchNorm2d(1)
         self.sigmoid = nn.Sigmoid()
 
     def get_xy(self, p: torch.Tensor):
@@ -401,16 +394,8 @@ class ObjectnessHead(nn.Module):
         :return p: (N, 1, H, W) probability of object
         """
 
-        feature = self.conv1(feature)
-        feature = self.norm1(feature)
-        feature = self.relu(feature)
-
-        feature = self.conv2(feature)
-        feature = self.norm2(feature)
-        feature = self.relu(feature)
-
-        feature = self.conv3(feature)
-        feature = self.norm3(feature)
+        feature = self.conv(feature)
+        feature = self.norm(feature)
         p = self.sigmoid(feature)
 
         return p
