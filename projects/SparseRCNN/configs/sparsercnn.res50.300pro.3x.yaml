@@ -6,10 +6,6 @@ MODEL:
         STRIDE_IN_1X1: False
     SparseRCNN:
         NUM_PROPOSALS: 300
-DATASETS:
-    TRAIN: ("coco_2017_train",)
-    TEST: ("coco_2017_val",)
 INPUT:
     CROP:
         ENABLED: True
-    FORMAT: "RGB"
