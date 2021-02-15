@@ -66,6 +66,8 @@ class SparseRCNN(nn.Module):
         giou_weight = cfg.MODEL.SparseRCNN.GIOU_WEIGHT
         l1_weight = cfg.MODEL.SparseRCNN.L1_WEIGHT
         no_object_weight = cfg.MODEL.SparseRCNN.NO_OBJECT_WEIGHT
+        regularization_weight = cfg.MODEL.SparseRCNN.REGULARIZATION_WEIGHT
+        self.regularization_p = cfg.MODEL.SparseRCNN.REGULARIZATION_P
         self.deep_supervision = cfg.MODEL.SparseRCNN.DEEP_SUPERVISION
         self.use_focal = cfg.MODEL.SparseRCNN.USE_FOCAL
 
@@ -75,7 +77,8 @@ class SparseRCNN(nn.Module):
                                    cost_bbox = l1_weight,
                                    cost_giou = giou_weight,
                                    use_focal = self.use_focal)
-        weight_dict = {"loss_ce": class_weight, "loss_bbox": l1_weight, "loss_giou": giou_weight}
+        weight_dict = {"loss_ce": class_weight, "loss_bbox": l1_weight, "loss_giou": giou_weight,
+                       "loss_regularization": regularization_weight}
         if self.deep_supervision:
             aux_weight_dict = {}
             for i in range(self.num_heads - 1):
@@ -141,6 +144,10 @@ class SparseRCNN(nn.Module):
                                          for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
 
             loss_dict = self.criterion(output, targets)
+            loss_dict['loss_regularization'] = 0
+            for name, p in self.named_parameters():
+                if 'bias' not in name:
+                    loss_dict['loss_regularization'] += torch.sum(torch.pow(p, self.regularization_p)) / self.regularization_p
             weight_dict = self.criterion.weight_dict
             for k in loss_dict.keys():
                 if k in weight_dict:
