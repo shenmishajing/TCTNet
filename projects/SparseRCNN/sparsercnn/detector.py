@@ -136,24 +136,24 @@ class SparseRCNN(nn.Module):
         outputs_class, outputs_coord = self.head(features, proposal_boxes, proposal_features)
         output = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
 
+        gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
+        targets = self.prepare_targets(gt_instances)
+        if self.deep_supervision:
+            output['aux_outputs'] = [{'pred_logits': a, 'pred_boxes': b}
+                                     for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
+
+        loss_dict = self.criterion(output, targets)
+        loss_dict['loss_regularization'] = 0
+        for name, p in self.named_parameters():
+            if 'bias' not in name:
+                loss_dict['loss_regularization'] += torch.sum(torch.pow(p, self.regularization_p)) / self.regularization_p
+        weight_dict = self.criterion.weight_dict
+        for k in loss_dict.keys():
+            if k in weight_dict:
+                loss_dict[k] *= weight_dict[k]
+
         if self.training:
-            gt_instances = [x["instances"].to(self.device) for x in batched_inputs]
-            targets = self.prepare_targets(gt_instances)
-            if self.deep_supervision:
-                output['aux_outputs'] = [{'pred_logits': a, 'pred_boxes': b}
-                                         for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
-
-            loss_dict = self.criterion(output, targets)
-            loss_dict['loss_regularization'] = 0
-            for name, p in self.named_parameters():
-                if 'bias' not in name:
-                    loss_dict['loss_regularization'] += torch.sum(torch.pow(p, self.regularization_p)) / self.regularization_p
-            weight_dict = self.criterion.weight_dict
-            for k in loss_dict.keys():
-                if k in weight_dict:
-                    loss_dict[k] *= weight_dict[k]
             return loss_dict
-
         else:
             box_cls = output["pred_logits"]
             box_pred = output["pred_boxes"]
@@ -164,7 +164,7 @@ class SparseRCNN(nn.Module):
                 height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
                 r = detector_postprocess(results_per_image, height, width)
-                processed_results.append({"instances": r})
+                processed_results.append({"instances": r, "loss_dict": loss_dict})
 
             return processed_results
 

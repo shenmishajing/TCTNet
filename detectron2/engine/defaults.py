@@ -46,7 +46,7 @@ from .train_loop import AMPTrainer, SimpleTrainer, TrainerBase
 __all__ = ["default_argument_parser", "default_setup", "DefaultPredictor", "DefaultTrainer"]
 
 
-def default_argument_parser(epilog=None):
+def default_argument_parser(epilog = None):
     """
     Create a parser with some common arguments used by detectron2 users.
 
@@ -57,8 +57,8 @@ def default_argument_parser(epilog=None):
         argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
-        epilog=epilog
-        or f"""
+        epilog = epilog
+                 or f"""
 Examples:
 
 Run on single machine:
@@ -71,20 +71,20 @@ Run on multiple machines:
     (machine0)$ {sys.argv[0]} --machine-rank 0 --num-machines 2 --dist-url <URL> [--other-flags]
     (machine1)$ {sys.argv[0]} --machine-rank 1 --num-machines 2 --dist-url <URL> [--other-flags]
 """,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class = argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
+    parser.add_argument("--config-file", default = "", metavar = "FILE", help = "path to config file")
     parser.add_argument(
         "--resume",
-        action="store_true",
-        help="Whether to attempt to resume from the checkpoint directory. "
-        "See documentation of `DefaultTrainer.resume_or_load()` for what it means.",
+        action = "store_true",
+        help = "Whether to attempt to resume from the checkpoint directory. "
+               "See documentation of `DefaultTrainer.resume_or_load()` for what it means.",
     )
-    parser.add_argument("--eval-only", action="store_true", help="perform evaluation only")
-    parser.add_argument("--num-gpus", type=int, default=1, help="number of gpus *per machine*")
-    parser.add_argument("--num-machines", type=int, default=1, help="total number of machines")
+    parser.add_argument("--eval-only", action = "store_true", help = "perform evaluation only")
+    parser.add_argument("--num-gpus", type = int, default = 1, help = "number of gpus *per machine*")
+    parser.add_argument("--num-machines", type = int, default = 1, help = "total number of machines")
     parser.add_argument(
-        "--machine-rank", type=int, default=0, help="the rank of this machine (unique per machine)"
+        "--machine-rank", type = int, default = 0, help = "the rank of this machine (unique per machine)"
     )
 
     # PyTorch still may leave orphan processes in multi-gpu training.
@@ -93,17 +93,17 @@ Run on multiple machines:
     port = 2 ** 15 + 2 ** 14 + hash(os.getpid() if sys.platform != "win32" else 1) % 2 ** 14
     parser.add_argument(
         "--dist-url",
-        default="tcp://127.0.0.1:{}".format(port),
-        help="initialization URL for pytorch distributed backend. See "
-        "https://pytorch.org/docs/stable/distributed.html for details.",
+        default = "tcp://127.0.0.1:{}".format(port),
+        help = "initialization URL for pytorch distributed backend. See "
+               "https://pytorch.org/docs/stable/distributed.html for details.",
     )
     parser.add_argument(
         "opts",
-        help="Modify config options by adding 'KEY VALUE' pairs at the end of the command. "
-        "See config references at "
-        "https://detectron2.readthedocs.io/modules/config.html#config-references",
-        default=None,
-        nargs=argparse.REMAINDER,
+        help = "Modify config options by adding 'KEY VALUE' pairs at the end of the command. "
+               "See config references at "
+               "https://detectron2.readthedocs.io/modules/config.html#config-references",
+        default = None,
+        nargs = argparse.REMAINDER,
     )
     return parser
 
@@ -125,8 +125,8 @@ def default_setup(cfg, args):
         PathManager.mkdirs(output_dir)
 
     rank = comm.get_rank()
-    setup_logger(output_dir, distributed_rank=rank, name="fvcore")
-    logger = setup_logger(output_dir, distributed_rank=rank)
+    setup_logger(output_dir, distributed_rank = rank, name = "fvcore")
+    logger = setup_logger(output_dir, distributed_rank = rank)
 
     logger.info("Rank of current process: {}. World size: {}".format(rank, comm.get_world_size()))
     logger.info("Environment info:\n" + collect_env_info())
@@ -286,7 +286,7 @@ class DefaultTrainer(TrainerBase):
         # For training, wrap with DDP. But don't need this for inference.
         if comm.get_world_size() > 1:
             model = DistributedDataParallel(
-                model, device_ids=[comm.get_local_rank()], broadcast_buffers=False
+                model, device_ids = [comm.get_local_rank()], broadcast_buffers = False
             )
         self._trainer = (AMPTrainer if cfg.SOLVER.AMP.ENABLED else SimpleTrainer)(
             model, data_loader, optimizer
@@ -299,8 +299,8 @@ class DefaultTrainer(TrainerBase):
             # Assume you want to save checkpoints together with logs/statistics
             model,
             cfg.OUTPUT_DIR,
-            optimizer=optimizer,
-            scheduler=self.scheduler,
+            optimizer = optimizer,
+            scheduler = self.scheduler,
         )
         self.start_iter = 0
         self.max_iter = cfg.SOLVER.MAX_ITER
@@ -308,7 +308,7 @@ class DefaultTrainer(TrainerBase):
 
         self.register_hooks(self.build_hooks())
 
-    def resume_or_load(self, resume=True):
+    def resume_or_load(self, resume = True):
         """
         If `resume==True` and `cfg.OUTPUT_DIR` contains the last checkpoint (defined by
         a `last_checkpoint` file), resume from the file. Resuming means loading all
@@ -322,7 +322,7 @@ class DefaultTrainer(TrainerBase):
         Args:
             resume (bool): whether to do resume or not
         """
-        checkpoint = self.checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume=resume)
+        checkpoint = self.checkpointer.resume_or_load(self.cfg.MODEL.WEIGHTS, resume = resume)
         if resume and self.checkpointer.has_checkpoint():
             self.start_iter = checkpoint.get("iteration", -1) + 1
             # The checkpoint stores the training iteration that just finished, thus we start
@@ -378,7 +378,7 @@ class DefaultTrainer(TrainerBase):
 
         if comm.is_main_process():
             # run writers in the end, so that evaluation metrics are written
-            ret.append(hooks.PeriodicWriter(self.build_writers(), period=20))
+            ret.append(hooks.PeriodicWriter(self.build_writers(), period = 20))
         return ret
 
     def build_writers(self):
@@ -500,7 +500,7 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
         )
 
     @classmethod
-    def test(cls, cfg, model, evaluators=None):
+    def test(cls, cfg, model, evaluators = None):
         """
         Args:
             cfg (CfgNode):
@@ -514,7 +514,7 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
         """
         logger = logging.getLogger(__name__)
         if isinstance(evaluators, DatasetEvaluator):
-            evaluators = [evaluators]
+            evaluators = [evaluators] * len(cfg.DATASETS.TEST)
         if evaluators is not None:
             assert len(cfg.DATASETS.TEST) == len(evaluators), "{} != {}".format(
                 len(cfg.DATASETS.TEST), len(evaluators)
@@ -602,7 +602,7 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
         cfg.defrost()
 
         assert (
-            cfg.SOLVER.IMS_PER_BATCH % old_world_size == 0
+                cfg.SOLVER.IMS_PER_BATCH % old_world_size == 0
         ), "Invalid REFERENCE_WORLD_SIZE in config!"
         scale = num_workers / old_world_size
         bs = cfg.SOLVER.IMS_PER_BATCH = int(round(cfg.SOLVER.IMS_PER_BATCH * scale))
@@ -631,8 +631,8 @@ for _attr in ["model", "data_loader", "optimizer"]:
         _attr,
         property(
             # getter
-            lambda self, x=_attr: getattr(self._trainer, x),
+            lambda self, x = _attr: getattr(self._trainer, x),
             # setter
-            lambda self, value, x=_attr: setattr(self._trainer, x, value),
+            lambda self, value, x = _attr: setattr(self._trainer, x, value),
         ),
     )

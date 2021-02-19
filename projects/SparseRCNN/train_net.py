@@ -21,7 +21,7 @@ import torch
 import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
-from detectron2.data import MetadataCatalog, build_detection_train_loader
+from detectron2.data import MetadataCatalog, build_detection_train_loader, build_detection_test_loader
 from detectron2.engine import AutogradProfiler, DefaultTrainer, default_argument_parser, default_setup, launch, hooks
 from detectron2.evaluation import COCOEvaluator, verify_results
 from detectron2.solver.build import maybe_add_gradient_clipping
@@ -50,6 +50,11 @@ class Trainer(DefaultTrainer):
     def build_train_loader(cls, cfg):
         mapper = SparseRCNNDatasetMapper(cfg, is_train = True)
         return build_detection_train_loader(cfg, mapper = mapper)
+
+    @classmethod
+    def build_test_loader(cls, cfg, dataset_name):
+        mapper = SparseRCNNDatasetMapper(cfg, is_train = True)
+        return build_detection_test_loader(cfg, dataset_name, mapper = mapper)
 
     @classmethod
     def build_optimizer(cls, cfg, model):
@@ -120,7 +125,7 @@ def setup(args):
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     default_setup(cfg, args)
-    if comm.is_main_process():
+    if comm.is_main_process() and cfg.WANDB.ENABLE:
         wandb.init(project = cfg.WANDB.PROJECT, name = cfg.WANDB.NAME, tags = cfg.WANDB.TAGS, config = cfg_node_to_dict(cfg),
                    sync_tensorboard = True)
     return cfg
@@ -138,6 +143,8 @@ def main(args):
         return res
 
     trainer = Trainer(cfg)
+    if comm.is_main_process() and cfg.WANDB.ENABLE:
+        wandb.watch(trainer.model)
     trainer.resume_or_load(resume = args.resume)
     return trainer.train()
 

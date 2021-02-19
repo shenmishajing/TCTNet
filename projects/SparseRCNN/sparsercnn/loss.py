@@ -13,8 +13,8 @@ from fvcore.nn import sigmoid_focal_loss_jit
 
 from .util import box_ops
 from .util.misc import (NestedTensor, nested_tensor_from_tensor_list,
-                       accuracy, get_world_size, interpolate,
-                       is_dist_avail_and_initialized)
+                        accuracy, get_world_size, interpolate,
+                        is_dist_avail_and_initialized)
 from .util.box_ops import box_cxcywh_to_xyxy, generalized_box_iou
 
 from scipy.optimize import linear_sum_assignment
@@ -26,6 +26,7 @@ class SetCriterion(nn.Module):
         1) we compute hungarian assignment between ground truth boxes and the outputs of the model
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
+
     def __init__(self, cfg, num_classes, matcher, weight_dict, eos_coef, losses, use_focal):
         """ Create the criterion.
         Parameters:
@@ -51,7 +52,7 @@ class SetCriterion(nn.Module):
             empty_weight[-1] = self.eos_coef
             self.register_buffer('empty_weight', empty_weight)
 
-    def loss_labels(self, outputs, targets, indices, num_boxes, log=False):
+    def loss_labels(self, outputs, targets, indices, num_boxes, log = False):
         """Classification loss (NLL)
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
         """
@@ -61,23 +62,23 @@ class SetCriterion(nn.Module):
         idx = self._get_src_permutation_idx(indices)
         target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
         target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits.device)
+                                    dtype = torch.int64, device = src_logits.device)
         target_classes[idx] = target_classes_o
 
         if self.use_focal:
             src_logits = src_logits.flatten(0, 1)
             # prepare one_hot target.
             target_classes = target_classes.flatten(0, 1)
-            pos_inds = torch.nonzero(target_classes != self.num_classes, as_tuple=True)[0]
+            pos_inds = torch.nonzero(target_classes != self.num_classes, as_tuple = True)[0]
             labels = torch.zeros_like(src_logits)
             labels[pos_inds, target_classes[pos_inds]] = 1
             # comp focal loss.
             class_loss = sigmoid_focal_loss_jit(
                 src_logits,
                 labels,
-                alpha=self.focal_loss_alpha,
-                gamma=self.focal_loss_gamma,
-                reduction="sum",
+                alpha = self.focal_loss_alpha,
+                gamma = self.focal_loss_gamma,
+                reduction = "sum",
             ) / num_boxes
             losses = {'loss_ce': class_loss}
         else:
@@ -89,7 +90,6 @@ class SetCriterion(nn.Module):
             losses['class_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
         return losses
 
-
     def loss_boxes(self, outputs, targets, indices, num_boxes):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
            targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
@@ -98,7 +98,7 @@ class SetCriterion(nn.Module):
         assert 'pred_boxes' in outputs
         idx = self._get_src_permutation_idx(indices)
         src_boxes = outputs['pred_boxes'][idx]
-        target_boxes = torch.cat([t['boxes_xyxy'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        target_boxes = torch.cat([t['boxes_xyxy'][i] for t, (_, i) in zip(targets, indices)], dim = 0)
 
         losses = {}
         loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(src_boxes, target_boxes))
@@ -108,11 +108,10 @@ class SetCriterion(nn.Module):
         src_boxes_ = src_boxes / image_size
         target_boxes_ = target_boxes / image_size
 
-        loss_bbox = F.l1_loss(src_boxes_, target_boxes_, reduction='none')
+        loss_bbox = F.l1_loss(src_boxes_, target_boxes_, reduction = 'none')
         losses['loss_bbox'] = loss_bbox.sum() / num_boxes
 
         return losses
-
 
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
@@ -148,10 +147,11 @@ class SetCriterion(nn.Module):
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
         num_boxes = sum(len(t["labels"]) for t in targets)
-        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
+        num_boxes = torch.as_tensor([num_boxes], dtype = torch.float, device = next(iter(outputs.values())).device)
         if is_dist_avail_and_initialized():
+            torch.distributed.barrier()
             torch.distributed.all_reduce(num_boxes)
-        num_boxes = torch.clamp(num_boxes / get_world_size(), min=1).item()
+        num_boxes = torch.clamp(num_boxes / get_world_size(), min = 1).item()
 
         # Compute all the requested losses
         losses = {}
@@ -175,7 +175,6 @@ class SetCriterion(nn.Module):
                     losses.update(l_dict)
 
         return losses
-
 
 
 class HungarianMatcher(nn.Module):
@@ -259,7 +258,7 @@ class HungarianMatcher(nn.Module):
 
         out_bbox_ = out_bbox / image_size_out
         tgt_bbox_ = tgt_bbox / image_size_tgt
-        cost_bbox = torch.cdist(out_bbox_, tgt_bbox_, p=1)
+        cost_bbox = torch.cdist(out_bbox_, tgt_bbox_, p = 1)
 
         # Compute the giou cost betwen boxes
         # cost_giou = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox))
@@ -271,4 +270,4 @@ class HungarianMatcher(nn.Module):
 
         sizes = [len(v["boxes"]) for v in targets]
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
-        return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
+        return [(torch.as_tensor(i, dtype = torch.int64), torch.as_tensor(j, dtype = torch.int64)) for i, j in indices]
