@@ -139,6 +139,8 @@ def main(args):
 
     trainer = Trainer(cfg)
     trainer.resume_or_load(resume = args.resume)
+    if cfg.WANDB.ENABLE and comm.is_main_process():
+        wandb.watch(trainer.model)
     return trainer.train()
 
 
