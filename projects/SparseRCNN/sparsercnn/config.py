@@ -53,4 +53,4 @@ def add_sparsercnn_config(cfg):
     cfg.WANDB.ENABLE = True
     cfg.WANDB.PROJECT = 'tct'
     cfg.WANDB.NAME = 'test'
-    cfg.WANDB.TAGS = ['Base-SparseRCNN']
+    cfg.WANDB.TAGS = ['Baseline-SparseRCNN']

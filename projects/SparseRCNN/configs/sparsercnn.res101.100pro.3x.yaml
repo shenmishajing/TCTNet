@@ -6,9 +6,6 @@ MODEL:
         STRIDE_IN_1X1: False
     SparseRCNN:
         NUM_PROPOSALS: 100
-SOLVER:
-    STEPS: (210000, 250000)
-    MAX_ITER: 270000
 INPUT:
     CROP:
         ENABLED: False
