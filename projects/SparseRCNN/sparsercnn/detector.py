@@ -75,7 +75,6 @@ class SparseRCNN(nn.Module):
                                    cost_bbox = l1_weight,
                                    cost_giou = giou_weight,
                                    use_focal = self.use_focal)
-        weight_dict = {"loss_ce": class_weight, "loss_bbox": l1_weight, "loss_giou": giou_weight, "loss_objectness": objectness_weight}
         weight_dict = {"loss_ce": class_weight, "loss_bbox": l1_weight, "loss_giou": giou_weight, "loss_objectness": objectness_weight,
                        "loss_regularization": regularization_weight}
         if self.deep_supervision:
