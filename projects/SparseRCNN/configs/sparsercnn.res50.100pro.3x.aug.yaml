@@ -1,0 +1,17 @@
+_BASE_: "Base-SparseRCNN.yaml"
+MODEL:
+    WEIGHTS: "detectron2://ImageNetPretrained/torchvision/R-50.pkl"
+    RESNETS:
+        DEPTH: 50
+        STRIDE_IN_1X1: False
+    SparseRCNN:
+        NUM_PROPOSALS: 100
+INPUT:
+    CROP:
+        ENABLED: False
+    AUG:
+        - T.RandomFlip()
+        - T.RandomRotation([0, 90, 180, 270], sample_style = 'range')
+        - T.RandomBrightness(0.7, 1.3)
+        - T.RandomContrast(0.7, 1.3)
+        - T.RandomSaturation(0.7, 1.3)
