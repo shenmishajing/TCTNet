@@ -235,7 +235,7 @@ class HungarianMatcher(nn.Module):
 
         # Also the target labels and boxes
         tgt_ids = [t["labels"] for t in targets]
-        tgt_bboxes = [t["boxes"] for t in targets]
+        tgt_bboxes = [t["boxes_xyxy"] for t in targets]
 
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - proba[target class].
