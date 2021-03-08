@@ -18,7 +18,7 @@ MODEL:
     SparseRCNN:
         NUM_CLASSES: 6
 SOLVER:
-    IMS_PER_BATCH: 16
+    IMS_PER_BATCH: 4
     BASE_LR: 0.000025
     STEPS: (30000, 45000)
     MAX_ITER: 50000
@@ -32,6 +32,7 @@ SOLVER:
         CLIP_TYPE: "full_model"
         CLIP_VALUE: 1.0
         NORM_TYPE: 2.0
+
 SEED: 40244023
 INPUT:
     MIN_SIZE_TRAIN: (480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800)

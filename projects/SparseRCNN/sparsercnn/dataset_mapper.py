@@ -36,7 +36,8 @@ def build_transform_gen(cfg, is_train):
     logger = logging.getLogger(__name__)
     tfm_gens = []
     if is_train:
-        tfm_gens.append(T.RandomFlip())
+        for t in cfg.INPUT.AUG:
+            tfm_gens.append(eval(t))
     tfm_gens.append(T.ResizeShortestEdge(min_size, max_size, sample_style))
     if is_train:
         logger.info("TransformGens used in training: " + str(tfm_gens))
@@ -56,10 +57,10 @@ class SparseRCNNDatasetMapper:
     4. Prepare image and annotation to Tensors
     """
 
-    def __init__(self, cfg, is_train=True):
+    def __init__(self, cfg, is_train = True):
         if cfg.INPUT.CROP.ENABLED and is_train:
             self.crop_gen = [
-                T.ResizeShortestEdge([400, 500, 600], sample_style="choice"),
+                T.ResizeShortestEdge([400, 500, 600], sample_style = "choice"),
                 T.RandomCrop(cfg.INPUT.CROP.TYPE, cfg.INPUT.CROP.SIZE),
             ]
         else:
@@ -82,7 +83,7 @@ class SparseRCNNDatasetMapper:
             dict: a format that builtin models in detectron2 accept
         """
         dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
-        image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
+        image = utils.read_image(dataset_dict["file_name"], format = self.img_format)
         utils.check_image_size(dataset_dict, image)
 
         if self.crop_gen is None:
